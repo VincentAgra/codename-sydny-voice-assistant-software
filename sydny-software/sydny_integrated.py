@@ -19,7 +19,7 @@ import vosk
 import pyaudio
 import subprocess
 import windows_system
-
+import task_system
 
 # ============================================================================
 # SIGNAL EMITTER (for thread-safe GUI updates)
@@ -130,11 +130,26 @@ class TerminalWidget(QTextEdit):
         self.setFont(font)
     
     def add_message(self, message):
-        """Add a message to the terminal and auto-scroll"""
-        self.append(message)
-        # Auto-scroll to bottom
-        scrollbar = self.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+            """Add a message to the terminal and auto-scroll with color support"""
+            # Check if this is a task line
+            if message.startswith("✓"):
+                # Completed task - green checkmark, gray text
+                self.setTextColor(QColor(0, 255, 0))  # Green for checkmark
+                self.insertPlainText("✓")
+                self.setTextColor(QColor(150, 150, 150))  # Gray for rest
+                self.insertPlainText(message[1:] + "\n")
+            elif message.startswith("○"):
+                # Active task - white
+                self.setTextColor(QColor(255, 255, 255))  # White
+                self.append(message)
+            else:
+                # Regular message - default green
+                self.setTextColor(QColor(0, 255, 0))  # Green
+                self.append(message)
+            
+            # Auto-scroll to bottom
+            scrollbar = self.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
     
     def clear(self):
         """Clear all messages"""
@@ -332,6 +347,9 @@ class VoiceSystem:
         
         # Create Vosk recognizer
         self.rec = vosk.KaldiRecognizer(self.model, 16000)
+
+        # Create task manager
+        self.task_manager = task_system.TaskManager()
         
         self.running = True
     
@@ -428,6 +446,54 @@ class VoiceSystem:
             
             if "sleep" in cleaned_words:
                 return ("sleep", None)
+            
+            # Check for task commands
+            if "task" in cleaned_words or "tasks" in cleaned_words:
+                # ADD TASK
+                if "add" in cleaned_words or "create" in cleaned_words or "new" in cleaned_words:
+                    remove_words = ["add", "create", "new", "task", "tasks"]
+                    task_words = [w for w in cleaned_words if w not in remove_words]
+                    
+                    # Check for priority
+                    priority = "normal"
+                    if "high" in task_words or "important" in task_words or "urgent" in task_words:
+                        priority = "high"
+                        task_words = [w for w in task_words if w not in ["high", "important", "urgent", "priority"]]
+                    elif "low" in task_words:
+                        priority = "low"
+                        task_words = [w for w in task_words if w not in ["low", "priority"]]
+                    
+                    if task_words:
+                        description = " ".join(task_words)
+                        return ("addtask", f"{description}|{priority}")
+                    else:
+                        return ("addtask", None)
+                
+                # LIST TASKS
+                if "list" in cleaned_words or "show" in cleaned_words or "what" in cleaned_words:
+                    if "all" in cleaned_words or "completed" in cleaned_words:
+                        return ("listalltasks", None)
+                    else:
+                        return ("listtasks", None)
+                
+                # COMPLETE TASK
+                if "complete" in cleaned_words or "finish" in cleaned_words or "done" in cleaned_words:
+                    for word in cleaned_words:
+                        if word.isdigit():
+                            return ("completetask", word)
+                    return ("completetask", None)
+                
+                # DELETE TASK
+                if "delete" in cleaned_words or "remove" in cleaned_words or "cancel" in cleaned_words:
+                    for word in cleaned_words:
+                        if word.isdigit():
+                            return ("deletetask", word)
+                    return ("deletetask", None)
+            
+            # TASK COUNT
+            if ("how" in cleaned_words and "many" in cleaned_words) or "count" in cleaned_words:
+                if "task" in cleaned_words or "tasks" in cleaned_words:
+                    return ("taskcount", None)
             
             if "exit" in cleaned_words or "quit" in cleaned_words:
                 return ("exit", None)
@@ -607,6 +673,93 @@ class VoiceSystem:
                                     print(f"Open file error: {e}")
                             else:
                                 self.speak("What file would you like me to open?")
+
+                        # Handle task commands
+                        elif intent == "addtask":
+                            if target:
+                                try:
+                                    parts = target.split("|")
+                                    description = parts[0]
+                                    priority = parts[1] if len(parts) > 1 else "normal"
+                                    result = self.task_manager.add_task(description, priority)
+                                    self.speak(result)
+                                except Exception as e:
+                                    self.speak("Error adding task")
+                                    print(f"Add task error: {e}")
+                            else:
+                                self.speak("What task would you like to add?")
+                        
+                        elif intent == "listtasks":
+                            try:
+                                tasks = self.task_manager.list_tasks()
+                                if tasks:
+                                    count = len(tasks)
+                                    self.speak(f"You have {count} tasks")
+                                    for task in tasks:
+                                        print(task)
+                                        self.signals.add_terminal_message.emit(task)
+                                        self.speak(task)
+                                else:
+                                    self.speak("You have no tasks")
+                            except Exception as e:
+                                self.speak("Error listing tasks")
+                                print(f"List tasks error: {e}")
+                        
+                        elif intent == "listalltasks":
+                            try:
+                                tasks = self.task_manager.list_tasks(show_completed=True)
+                                if tasks:
+                                    count = len(tasks)
+                                    self.speak(f"You have {count} total tasks")
+                                    for task in tasks:
+                                        print(task)
+                                        self.signals.add_terminal_message.emit(task)
+                                        self.speak(task)
+                                else:
+                                    self.speak("You have no tasks")
+                            except Exception as e:
+                                self.speak("Error listing tasks")
+                                print(f"List all tasks error: {e}")
+                        
+                        elif intent == "completetask":
+                            if target:
+                                try:
+                                    task_id = int(target)
+                                    result = self.task_manager.complete_task(task_id)
+                                    self.speak(result)
+                                except ValueError:
+                                    self.speak("Please specify a valid task number")
+                                except Exception as e:
+                                    self.speak("Error completing task")
+                                    print(f"Complete task error: {e}")
+                            else:
+                                self.speak("Which task number would you like to complete?")
+                        
+                        elif intent == "deletetask":
+                            if target:
+                                try:
+                                    task_id = int(target)
+                                    if self.get_confirmation_gui(f"Confirm delete task {task_id}?"):
+                                        result = self.task_manager.delete_task(task_id)
+                                        self.speak(result)
+                                    else:
+                                        self.speak("Delete cancelled")
+                                except ValueError:
+                                    self.speak("Please specify a valid task number")
+                                except Exception as e:
+                                    self.speak("Error deleting task")
+                                    print(f"Delete task error: {e}")
+                            else:
+                                self.speak("Which task number would you like to delete?")
+                        
+                        elif intent == "taskcount":
+                            try:
+                                active = self.task_manager.get_task_count()
+                                total = self.task_manager.get_task_count(include_completed=True)
+                                self.speak(f"You have {active} active tasks and {total} total tasks")
+                            except Exception as e:
+                                self.speak("Error counting tasks")
+                                print(f"Task count error: {e}")
                         
                         # Handle unknown commands
                         elif intent is None:

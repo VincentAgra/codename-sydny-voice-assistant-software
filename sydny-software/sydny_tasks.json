@@ -1,0 +1,29 @@
+{
+  "tasks": [
+    {
+      "id": 1,
+      "description": "Buy groceries",
+      "priority": "normal",
+      "completed": false,
+      "created": "2025-12-03T20:44:21.431394",
+      "completed_at": null
+    },
+    {
+      "id": 2,
+      "description": "Finish SYDNY project",
+      "priority": "high",
+      "completed": true,
+      "created": "2025-12-03T20:44:21.432286",
+      "completed_at": "2025-12-03T20:44:21.433557"
+    },
+    {
+      "id": 3,
+      "description": "Call mom",
+      "priority": "low",
+      "completed": false,
+      "created": "2025-12-03T20:44:21.432737",
+      "completed_at": null
+    }
+  ],
+  "last_updated": "2025-12-03T20:44:21.433583"
+}
